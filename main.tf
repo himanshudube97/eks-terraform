@@ -2,7 +2,8 @@
 locals {
     env         = "staging"                   # Environment name, used to tag resources (like staging, dev, prod)
     region      = "ap-south-1"                # AWS region to deploy resources into
-    zone1       = "ap-south-1a"             # Specific availability zone (AZ) within the region
+    zone1       = "ap-south-1a"
+    zone2       = "ap-south-1b"     # Specific availability zone (AZ) within the region
     eks_name    = "demo"                      # Name of the EKS cluster to be created later
     eks_version = "1.29"                      # EKS Kubernetes version
 }
@@ -59,6 +60,17 @@ resource "aws_subnet" "private_zone1" {
     "kubernetes.io/cluster/${local.env}-${local.eks_name}" = "owned"  # Tag for EKS cluster discovery
   }
 }
+resource "aws_subnet" "private_zone2" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.32.0/19"         # Smaller subnet range inside the VPC
+  availability_zone = local.zone2
+
+  tags = {
+    "Name"                                                 = "${local.env}-private-${local.zone2}"
+    "kubernetes.io/role/internal-elb"                      = "1"  # For internal ELB support in Kubernetes
+    "kubernetes.io/cluster/${local.env}-${local.eks_name}" = "owned"  # Tag for EKS cluster discovery
+  }
+}
 
 # Create a public subnet in the same availability zone
 resource "aws_subnet" "public_zone1" {
@@ -69,6 +81,18 @@ resource "aws_subnet" "public_zone1" {
 
   tags = {
     "Name"                                                 = "${local.env}-public-${local.zone1}"
+    "kubernetes.io/role/elb"                               = "1"  # For internet-facing load balancer
+    "kubernetes.io/cluster/${local.env}-${local.eks_name}" = "owned"
+  }
+}
+resource "aws_subnet" "public_zone2" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.96.0/19"
+  availability_zone       = local.zone2
+  map_public_ip_on_launch = true              # Auto-assign public IPs to instances launched in this subnet
+
+  tags = {
+    "Name"                                                 = "${local.env}-public-${local.zone2}"
     "kubernetes.io/role/elb"                               = "1"  # For internet-facing load balancer
     "kubernetes.io/cluster/${local.env}-${local.eks_name}" = "owned"
   }
@@ -88,7 +112,7 @@ resource "aws_eip" "nat" {
 # NAT Gateway allows private subnets to access the internet securely
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat.id             # Associate the EIP with this NAT Gateway
-  subnet_id     = aws_subnet.public_zone1.id # NAT Gateway must be in a public subnet to work
+  subnet_id     = aws_subnet.public_zone1.id # NAT Gateway must be in a public subnet to work . So we are keep it in public zone 1 and will keep alb in public zone2
 
   tags = {
     Name = "${local.env}-nat"
@@ -134,10 +158,18 @@ resource "aws_route_table_association" "private_zone1" {
   subnet_id      = aws_subnet.private_zone1.id
   route_table_id = aws_route_table.private.id
 }
+resource "aws_route_table_association" "private_zone2" {
+  subnet_id      = aws_subnet.private_zone2.id
+  route_table_id = aws_route_table.private.id
+}
 
 # Associate public subnet with the public route table
 resource "aws_route_table_association" "public_zone1" {
   subnet_id      = aws_subnet.public_zone1.id
+  route_table_id = aws_route_table.public.id
+}
+resource "aws_route_table_association" "public_zone2" {
+  subnet_id      = aws_subnet.public_zone2.id
   route_table_id = aws_route_table.public.id
 }
 
@@ -173,3 +205,24 @@ resource "aws_route_table_association" "public_zone1" {
             #    +-------▼--------+
             #    | Private Subnet | ← EC2s, DBs, etc.
             #    +----------------+
+
+# 🧠 So why does NAT Gateway need an Elastic IP, but IGW doesn’t?
+# ✅ 1. IGW is not a device you own
+# The Internet Gateway is AWS-managed, and it’s not tied to a single instance or IP address.
+
+# It just bridges your VPC to the internet.
+
+# It doesn't require an IP because it routes traffic from EC2 instances that already have public IPs.
+
+# Think of it as a toll gate on a highway — it doesn't need a license plate; your car (the EC2 instance) has the license (public IP).
+
+# ✅ 2. NAT Gateway is a specific AWS resource
+# A NAT Gateway is an actual managed resource placed in your public subnet.
+
+# It needs a public IP address (Elastic IP) so it can:
+
+# Receive response traffic from the internet.
+
+# Forward outbound traffic from private subnets to the internet.
+
+# Think of the NAT Gateway as a middleman with a phone number (Elastic IP) — if your private instances want to talk to the internet, the NAT forwards messages and receives responses on their behalf using that public IP.
