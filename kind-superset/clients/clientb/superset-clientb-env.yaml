@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: superset-clientb-env  ## superset-{{ Values.nameOverride }}-env
+  namespace: clientb-superset
+type: Opaque
+stringData:
+  # database
+  DB_HOST: host.docker.internal
+  DB_NAME: clientbdb
+  DB_PASS: clientbdb
+  DB_PORT: "5432"
+  DB_USER: clientbdb
+  SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://clientbdb:clientbdb@host.docker.internal:5432/clientbdb
+
+  # app
+  SUPERSET_SECRET_KEY: "somerandomkey"
+  APPLICATION_HOST: "clientb.test.org"
+
+  # redis
+  REDIS_CELERY_DB: "0"
+  REDIS_DB: "1"
+  REDIS_HOST: "clientb-redis-headless" ## "{{ .Release.Name }}-redis-headless"
+  REDIS_PORT: "6379"
+  REDIS_PROTO: redis
+  REDIS_USER: ""
+
+  # google oauth
+  ENABLE_OAUTH: 
+  GOOGLE_CLIENT_ID:
+  GOOGLE_CLIENT_SECRET:
+  GOOGLE_WHITELISTED_DOMAIN:
